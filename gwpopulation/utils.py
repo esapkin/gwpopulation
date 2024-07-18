@@ -316,3 +316,7 @@ def to_numpy(array):
         return np.asarray(array)
     else:
         raise TypeError(f"Cannot convert {type(array)} to numpy array")
+
+
+def dummy_model(dataset):
+    return 1

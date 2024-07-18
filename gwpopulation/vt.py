@@ -60,11 +60,13 @@ __all__ = [
 
 class _BaseVT:
     def __init__(self, model, data):
+        self.subpops = list(model.keys())
         self.data = data
-        if isinstance(model, list):
-            model = Model(model)
-        elif not isinstance(model, Model):
-            model = Model([model])
+        for subpop in self.subpops:
+            if isinstance(model[subpop], list):
+                model[subpop] = Model(model[subpop])
+            elif not isinstance(model[subpop], Model):
+                model[subpop] = Model([model[subpop]])
         self.model = model
 
     def __call__(self, *args, **kwargs):
@@ -85,6 +87,8 @@ class GridVT(_BaseVT):
     """
 
     def __init__(self, model, data):
+        raise AttributeError("Not implemented.")
+    
         self.vts = data.pop("vt")
         super(GridVT, self).__init__(model=model, data=data)
         self.values = {key: xp.unique(self.data[key]) for key in self.data}
@@ -94,6 +98,8 @@ class GridVT(_BaseVT):
         self.ndim = len(self.axes)
 
     def __call__(self, parameters):
+        raise AttributeError("Not implemented.")
+    
         self.model.parameters.update(parameters)
         vt_fac = self.model.prob(self.data) * self.vts
         for ii in range(self.ndim):
@@ -152,12 +158,19 @@ class ResamplingVT(_BaseVT):
     ):
         super(ResamplingVT, self).__init__(model=model, data=data)
         self.n_events = n_events
-        self.total_injections = data.get("total_generated", len(data["prior"]))
-        self.analysis_time = data.get("analysis_time", 1)
+        self.total_injections = 0
+        self.analysis_time = list(data.values())[0].get("analysis_time", 1)
         self.redshift_model = None
         self.marginalize_uncertainty = marginalize_uncertainty
         self.enforce_convergence = enforce_convergence
-        for _model in self.model.models:
+        for subpop in self.subpops:
+            self.total_injections += data[subpop].get("total_generated", len(data[subpop]["prior"]))
+        self.frac_injections = dict()
+        for subpop in self.subpops:
+            self.frac_injections[subpop] = (
+                data[subpop].get("total_generated", len(data[subpop]["prior"])) / self.total_injections
+            )
+        for _model in list(self.model.values())[0].models:
             if isinstance(_model, _Redshift):
                 self.redshift_model = _model
         if self.redshift_model is None:
@@ -249,15 +262,22 @@ class ResamplingVT(_BaseVT):
             The expected fracion of detections :math:`P_{\rm det}`.
         var: float
             The variance in the estimate of :math:`P_{\rm det}`.
-        """
-        self.model.parameters.update(parameters)
-        weights = self.model.prob(self.data) / self.data["prior"]
-        mu = to_number(xp.sum(weights) / self.total_injections, float)
-        var = to_number(
-            xp.sum(weights**2) / self.total_injections**2
-            - mu**2 / self.total_injections,
-            float,
-        )
+        """            
+        sum_weights = 0.
+        sum_square_weights = 0.
+        for subpop in self.subpops:
+            self.model[subpop].parameters.update(parameters)
+            weights = self.model[subpop].prob(self.data[subpop]) / self.data[subpop]["prior"]
+            sum_weights += (
+                self.model[subpop].parameters[f'lambda_subpop_{subpop}'] / self.frac_injections[subpop]
+                * xp.sum(weights)
+            )
+            sum_square_weights += (
+                (self.model[subpop].parameters[f'lambda_subpop_{subpop}'] / self.frac_injections[subpop])**2
+                * xp.sum(weights**2)
+            )
+        mu = to_number(sum_weights / self.total_injections, float)
+        var = to_number(mu**2 * sum_square_weights / sum_weights**2, float)
         return mu, var
 
     def surveyed_hypervolume(self, parameters):
