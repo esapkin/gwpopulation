@@ -92,6 +92,18 @@ def independent_spin_magnitude_beta(
     return prior
 
 
+def iid_primary_spin_magnitude_beta(dataset, amax=1, alpha_chi=1, beta_chi=1):
+    r"""
+    """
+    return beta_dist(dataset["a_1"], alpha_chi, beta_chi, scale=amax)
+
+
+def iid_secondary_spin_magnitude_beta(dataset, amax=1, alpha_chi=1, beta_chi=1):
+    r"""
+    """
+    return beta_dist(dataset["a_2"], alpha_chi, beta_chi, scale=amax)
+
+
 def iid_spin_orientation_gaussian_isotropic(dataset, xi_spin, sigma_spin):
     r"""
     A mixture model of spin orientations with isotropic and normally
@@ -153,6 +165,24 @@ def independent_spin_orientation_gaussian_isotropic(dataset, xi_spin, sigma_1, s
     prior = (1 - xi_spin) / 4 + xi_spin * truncnorm(
         dataset["cos_tilt_1"], 1, sigma_1, 1, -1
     ) * truncnorm(dataset["cos_tilt_2"], 1, sigma_2, 1, -1)
+    return prior
+
+
+def iid_primary_spin_orientation_gaussian_isotropic(dataset, xi_spin, sigma_spin):
+    r"""
+    """
+    prior = (1 - xi_spin) / 2 + xi_spin * truncnorm(
+        dataset["cos_tilt_1"], 1, sigma_spin, 1, -1
+    )
+    return prior
+
+
+def iid_secondary_spin_orientation_gaussian_isotropic(dataset, xi_spin, sigma_spin):
+    r"""
+    """
+    prior = (1 - xi_spin) / 2 + xi_spin * truncnorm(
+        dataset["cos_tilt_2"], 1, sigma_spin, 1, -1
+    )
     return prior
 
 
