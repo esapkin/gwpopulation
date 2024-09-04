@@ -18,6 +18,7 @@ __all__ = [
     "independent_spin_orientation_gaussian_isotropic",
     "gaussian_chi_eff",
     "gaussian_chi_p",
+    "dummy_tilt",
 ]
 
 
@@ -213,6 +214,9 @@ def gaussian_chi_p(dataset, mu_chi_p, sigma_chi_p):
     """
     return truncnorm(dataset["chi_p"], mu=mu_chi_p, sigma=sigma_chi_p, low=0, high=1)
 
+
+def dummy_tilt():
+    return 1
 
 class GaussianChiEffChiP(object):
     r"""
