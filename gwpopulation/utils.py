@@ -6,7 +6,7 @@ from numbers import Number
 from operator import ge, gt, ne
 
 import numpy as np
-import scipy
+from scipy import special as scs
 
 xp = np
 
@@ -86,7 +86,7 @@ def beta_dist(xx, alpha, beta, scale=1):
 
     """
     ln_beta = (alpha - 1) * xp.log(xx) + (beta - 1) * xp.log(scale - xx)
-    ln_beta -= scipy.special.betaln(alpha, beta)
+    ln_beta -= scs.betaln(alpha, beta)
     ln_beta -= (alpha + beta - 1) * xp.log(scale)
     prob = xp.exp(ln_beta)
     prob = xp.nan_to_num(prob)
@@ -161,7 +161,7 @@ def truncnorm(xx, mu, sigma, high, low):
 
     """
     norm = 2**0.5 / xp.pi**0.5 / sigma
-    norm /= scipy.special.erf((high - mu) / 2**0.5 / sigma) + scipy.special.erf(
+    norm /= scs.erf((high - mu) / 2**0.5 / sigma) + scs.erf(
         (mu - low) / 2**0.5 / sigma
     )
     prob = xp.exp(-xp.power(xx - mu, 2) / (2 * sigma**2))
@@ -240,9 +240,9 @@ def von_mises(xx, mu, kappa):
     Notes
     -----
     For numerical stability, the factor of :math:`\exp(\kappa)` from using
-    :func:`scipy.special.i0e` is accounted for in the numerator.
+    :func:`scs.i0e` is accounted for in the numerator.
     """
-    return xp.exp(kappa * (xp.cos(xx - mu) - 1)) / (2 * xp.pi * scipy.special.i0e(kappa))
+    return xp.exp(kappa * (xp.cos(xx - mu) - 1)) / (2 * xp.pi * scs.i0e(kappa))
 
 
 def get_version_information():
@@ -516,7 +516,7 @@ def Joint_prob_Xeff_Xp(Xeff,Xp,q = 1,amax = 1,flag_debug = False):
         r'''
         Spence's function or dilogarithm Li_2(z).
         '''
-        return scipy.special.spence(1-z)
+        return scs.spence(1-z)
 
     def g(x0,a0,b0):
         r'''
