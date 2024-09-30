@@ -73,7 +73,7 @@ class HyperparameterLikelihood(Likelihood):
         self,
         posteriors,
         hyper_prior,
-        ln_evidences=None,
+        ln_evidences,
         max_samples=1e100,
         selection_function=lambda args: 1,
         conversion_function=lambda args: (args, None),
@@ -83,18 +83,17 @@ class HyperparameterLikelihood(Likelihood):
         """
         Parameters
         ----------
-        posteriors: list
-            An list of pandas data frames of samples sets of samples.
+        posteriors: dict of lists
+            A list of pandas data frames of samples sets of samples.
             Each set may have a different size.
             These can contain a `prior` column containing the original prior
             values.
-        hyper_prior: `bilby.hyper.model.Model`
-            The population model, this can alternatively be a function.
-        ln_evidences: list, optional
+        hyper_prior: dict of `bilby.hyper.model.Model`
+            The population models, this can alternatively be a function.
+        ln_evidences: dict of lists
             Log evidences for single runs to ensure proper normalisation
-            of the hyperparameter likelihood. If not provided, the original
-            evidences will be set to 0. This produces a Bayes factor between
-            the sampling power_prior and the hyperparameterised model.
+            of the hyperparameter likelihood. This produces a Bayes factor
+            between the sampling power_prior and the hyperparameterised model.
         selection_function: func
             Function which evaluates your population selection function.
         conversion_function: func
@@ -116,37 +115,43 @@ class HyperparameterLikelihood(Likelihood):
                 "likelihood. Use gwpopulation.set_backend instead."
             )
 
-        self.samples_per_posterior = max_samples
-        self.data = self.resample_posteriors(posteriors, max_samples=max_samples)
-
-        if isinstance(hyper_prior, types.FunctionType):
-            hyper_prior = Model([hyper_prior])
-        elif not (
-            hasattr(hyper_prior, "parameters")
-            and callable(getattr(hyper_prior, "prob"))
-        ):
-            raise AttributeError(
-                "hyper_prior must either be a function, "
-                "or a class with attribute 'parameters' and method 'prob'"
+        self.samples_per_posterior = dict()
+        self.data = dict()
+        self.hyper_prior = dict()
+        self.sampling_prior = dict()
+        self.ln_evidences = dict()
+        self.subpops = list(posteriors.keys())
+        
+        for subpop in self.subpops:
+            self.data[subpop], self.samples_per_posterior[subpop] = self.resample_posteriors(
+                posteriors[subpop], max_samples=max_samples
             )
-        self.hyper_prior = hyper_prior
-        super(HyperparameterLikelihood, self).__init__(hyper_prior.parameters)
+            if isinstance(hyper_prior[subpop], types.FunctionType):
+                hyper_prior[subpop] = Model([hyper_prior[subpop]])
+            elif not (
+                hasattr(hyper_prior[subpop], "parameters")
+                and callable(getattr(hyper_prior[subpop], "prob"))
+            ):
+                raise AttributeError(
+                    f"{subpop} hyper_prior must either be a function, "
+                    "or a class with attribute 'parameters' and method 'prob'"
+                )
+            self.hyper_prior[subpop] = hyper_prior[subpop]
+            super(HyperparameterLikelihood, self).__init__(hyper_prior[subpop].parameters)
 
-        if "prior" in self.data:
-            self.sampling_prior = self.data.pop("prior")
-        else:
-            logger.info("No prior values provided, defaulting to 1.")
-            self.sampling_prior = 1
+            if "prior" in self.data[subpop]:
+                self.sampling_prior[subpop] = self.data[subpop].pop("prior")
+            else:
+                logger.info(f"No {subpop} prior values provided, defaulting to 1.")
+                self.sampling_prior[subpop] = 1
 
-        if ln_evidences is not None:
-            self.total_noise_evidence = np.sum(ln_evidences)
-        else:
-            self.total_noise_evidence = np.nan
+            self.ln_evidences[subpop] = xp.array(ln_evidences[subpop])
+        self.total_noise_evidence = np.sum(list(ln_evidences.values())[0])
 
         self.conversion_function = conversion_function
         self.selection_function = selection_function
 
-        self.n_posteriors = len(posteriors)
+        self.n_posteriors = len(list(posteriors.items())[0])
         self.maximum_uncertainty = maximum_uncertainty
         self._inf = np.nan_to_num(np.inf)
 
@@ -174,7 +179,8 @@ class HyperparameterLikelihood(Likelihood):
         Compute the ln likelihood estimator and its variance.
         """
         self.parameters, added_keys = self.conversion_function(self.parameters)
-        self.hyper_prior.parameters.update(self.parameters)
+        for subpop in self.subpops:
+            self.hyper_prior[subpop].parameters.update(self.parameters)
         ln_bayes_factors, variances = self._compute_per_event_ln_bayes_factors()
         ln_l = xp.sum(ln_bayes_factors)
         variance = xp.sum(variances)
@@ -202,16 +208,23 @@ class HyperparameterLikelihood(Likelihood):
                 self.parameters.pop(key)
 
     def _compute_per_event_ln_bayes_factors(self, return_uncertainty=True):
-        weights = self.hyper_prior.prob(self.data) / self.sampling_prior
-        expectation = xp.mean(weights, axis=-1)
+        per_event_likelihood = 0.
+        variance = 0.
+        for subpop in self.subpops:
+            bayes_factor = xp.exp(self.ln_evidences[subpop] - list(self.ln_evidences.values())[0])
+            weights = self.hyper_prior[subpop].prob(self.data[subpop]) / self.sampling_prior[subpop]
+            expectation = self.parameters[f'lambda_subpop_{subpop}'] * xp.mean(weights, axis=-1)
+            per_event_likelihood += bayes_factor * expectation
+            if return_uncertainty:
+                square_expectation = self.parameters[f'lambda_subpop_{subpop}']**2 * xp.mean(weights**2, axis=-1)
+                variance += (
+                    bayes_factor**2 * (square_expectation - expectation**2) / self.samples_per_posterior[subpop]
+                )
         if return_uncertainty:
-            square_expectation = xp.mean(weights**2, axis=-1)
-            variance = (square_expectation - expectation**2) / (
-                self.samples_per_posterior * expectation**2
-            )
-            return xp.log(expectation), variance
+            variance /= per_event_likelihood**2
+            return xp.log(per_event_likelihood), variance
         else:
-            return xp.log(expectation)
+            return xp.log(per_event_likelihood)
 
     def _get_selection_factor(self, return_uncertainty=True):
         selection, variance = self._selection_function_with_uncertainty()
@@ -265,7 +278,8 @@ class HyperparameterLikelihood(Likelihood):
         """
         self.parameters.update(sample.copy())
         self.parameters, added_keys = self.conversion_function(self.parameters)
-        self.hyper_prior.parameters.update(self.parameters)
+        for subpop in self.subpops:
+            self.hyper_prior[subpop].parameters.update(self.parameters)
         ln_ls, variances = self._compute_per_event_ln_bayes_factors(
             return_uncertainty=True
         )
@@ -348,14 +362,13 @@ class HyperparameterLikelihood(Likelihood):
             max_samples = min(len(posterior), max_samples)
         data = {key: [] for key in posteriors[0]}
         logger.debug(f"Downsampling to {max_samples} samples per posterior.")
-        self.samples_per_posterior = max_samples
         for posterior in posteriors:
-            temp = posterior.sample(self.samples_per_posterior)
+            temp = posterior.sample(max_samples)
             for key in data:
                 data[key].append(temp[key])
         for key in data:
             data[key] = xp.array(data[key])
-        return data
+        return data, max_samples
 
     def posterior_predictive_resample(self, samples, return_weights=False):
         """
@@ -378,6 +391,8 @@ class HyperparameterLikelihood(Likelihood):
         weights: array-like
             Weights to apply to the samples, only if :code:`return_weights == True`.
         """
+        raise AttributeError("posterior_predictive_resample not implemented.")
+
         import pandas as pd
         from tqdm.auto import tqdm
 
@@ -439,10 +454,16 @@ class HyperparameterLikelihood(Likelihood):
     @property
     def meta_data(self):
         return dict(
-            model=[get_name(model) for model in self.hyper_prior.models],
-            data={key: to_numpy(self.data[key]) for key in self.data},
+            model={subpop:
+                    [get_name(model) for model in self.hyper_prior[subpop].models]
+                   for subpop in self.subpops},
+            data={subpop:
+                    {key: to_numpy(self.data[subpop][key]) for key in self.data[subpop]}
+                  for subpop in self.subpops},
             n_events=self.n_posteriors,
-            sampling_prior=to_numpy(self.sampling_prior),
+            sampling_prior={subpop:
+                                to_numpy(self.sampling_prior[subpop])
+                            for subpop in self.subpops},
             samples_per_posterior=self.samples_per_posterior,
         )
 

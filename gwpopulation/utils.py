@@ -715,3 +715,6 @@ def Joint_prob_Xeff_Xp(Xeff,Xp,q = 1,amax = 1,flag_debug = False):
         int_1,int_2,int_3,int_4 = Joint_prob_Xeff_Xp_1(Xeff/amax,Xp/amax,q,flag_debug)
         return int_1/amax/amax,int_2/amax/amax,int_3/amax/amax,int_4/amax/amax
     return Joint_prob_Xeff_Xp_1(Xeff/amax,Xp/amax,q,flag_debug)/amax/amax
+
+def dummy_model(dataset):
+    return 1
